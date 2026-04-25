@@ -5,11 +5,23 @@ A minimal macOS menu bar app that locks keyboard input so you can clean your key
 ## Features
 
 - One-click keyboard lock from the menu bar
-- Uses CGEventTap to intercept all key events system-wide
-- Mouse and trackpad stay active while keyboard is locked
+- **Auto-Unlock Timer** — automatically unlock after 1, 3, 5, or 10 minutes
+- **Launch at Login** — toggle from the menu, no manual setup
+- Blocks all key events system-wide including media keys (volume, brightness, play/pause)
+- Distinct sound feedback on lock and unlock
+- Guided Accessibility permission setup on first launch
 - Tiny footprint — no background services, no Launch Agents
 
 ## Install
+
+### Option 1 — Homebrew (recommended)
+
+```bash
+brew tap egowic/tap
+brew install --cask keyboard-cleaner
+```
+
+### Option 2 — curl
 
 ```bash
 curl -L https://github.com/egowic/KeyboardCleaner/releases/latest/download/KeyboardCleaner.zip \
@@ -28,30 +40,36 @@ macOS may block the app on first launch. To open it anyway:
 
 After that, it opens normally without the warning.
 
-### Permissions
+### Accessibility Permission
 
-KeyboardCleaner requires **Accessibility** access to intercept keyboard events. On first launch, macOS will prompt you — grant access in **System Settings → Privacy & Security → Accessibility**.
+KeyboardCleaner requires **Accessibility** access to intercept keyboard events. On first launch the app will guide you — or go to **System Settings → Privacy & Security → Accessibility** and enable KeyboardCleaner manually.
 
 ## Usage
 
 1. Click the keyboard icon in the menu bar
-2. Select **Lock** — keyboard input is now blocked
-3. Clean your keys
-4. Select **Unlock** (or use the trackpad to click the menu bar icon → **Unlock**)
+2. Select **Lock Keyboard** — keyboard input is now blocked (icon changes to a lock)
+3. Optionally set an **Auto-Unlock Timer** from the submenu
+4. Clean your keys
+5. Select **Unlock Keyboard** (or use the trackpad to click the menu bar icon)
 
 ## Uninstall
 
 ```bash
+# Homebrew
+brew uninstall --cask keyboard-cleaner
+
+# Manual
 rm -rf /Applications/KeyboardCleaner.app
 ```
 
 ## Build from source
 
-Requires Xcode 15+.
+Requires Xcode 15+, macOS 13+.
 
 ```bash
 git clone https://github.com/egowic/KeyboardCleaner.git
-open KeyboardCleaner/KeyboardCleaner.xcodeproj
+cd KeyboardCleaner
+open KeyboardCleaner.xcodeproj
 ```
 
-Build and run with ⌘R.
+Build and run with `⌘R`.
