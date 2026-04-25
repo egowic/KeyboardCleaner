@@ -9,7 +9,7 @@ A minimal macOS menu bar app that locks keyboard input so you can clean your key
 - **Click blocker** — while locked, only the menu bar remains interactive (Dock and desktop are blocked)
 - **Composite menu bar icon** — keyboard + open lock when unlocked, keyboard + closed lock when locked
 - Blocks all key events system-wide including media keys (volume, brightness, play/pause)
-- **Built-in update checker** — notifies you when a new version is available
+- **Auto-update** — automatically downloads and installs new versions in the background
 - **Launch at Login** — toggle from the menu, no manual setup
 - Guided Accessibility permission setup on first launch
 - Distinct sound feedback on lock and unlock
@@ -31,7 +31,7 @@ brew tap egowic/tap
 brew install --cask keycleaner
 ```
 
-### Option 2 — curl
+### Option 2 — Direct download
 
 ```bash
 curl -L https://github.com/egowic/KeyboardCleaner/releases/latest/download/KeyboardCleaner.zip \
@@ -54,22 +54,9 @@ KeyboardCleaner requires **Accessibility** access to intercept keyboard events. 
 
 ## Update
 
-### Homebrew
+KeyboardCleaner checks for updates automatically on each launch. When a new version is available, it will download and install it for you — just click **Relaunch Now** when prompted.
 
-```bash
-brew update && brew upgrade --cask keycleaner
-```
-
-### Manual / curl
-
-The app checks for updates automatically on each launch and notifies you when a new version is available. You can also check manually via the menu bar icon → **Check for Updates…**
-
-To update manually:
-
-```bash
-curl -L https://github.com/egowic/KeyboardCleaner/releases/latest/download/KeyboardCleaner.zip \
-  -o /tmp/KeyboardCleaner.zip && unzip -o /tmp/KeyboardCleaner.zip -d /Applications
-```
+You can also check manually via the menu bar icon → **Check for Updates…**
 
 ## Usage
 
@@ -87,7 +74,7 @@ curl -L https://github.com/egowic/KeyboardCleaner/releases/latest/download/Keybo
 # Homebrew
 brew uninstall --cask keycleaner
 
-# Manual
+# Direct download
 rm -rf /Applications/KeyboardCleaner.app
 ```
 
