@@ -497,11 +497,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func showRelaunchAfterUpdateAlert(version: String) {
         let alert = NSAlert()
-        alert.messageText = "Update Installed — v\(version)"
-        alert.informativeText = "KeyboardCleaner has been updated. Relaunch to use the new version."
+        alert.messageText = "Relaunch Required — v\(version) is Ready"
+        alert.informativeText = "The update has been installed, but it won't take effect until KeyboardCleaner is relaunched.\n\nRelaunch now to start using v\(version)."
         alert.addButton(withTitle: "Relaunch Now")
         alert.addButton(withTitle: "Later")
-        alert.alertStyle = .informational
+        alert.alertStyle = .warning
         if alert.runModal() == .alertFirstButtonReturn {
             relaunchApp()
         }
