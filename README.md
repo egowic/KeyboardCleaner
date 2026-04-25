@@ -5,12 +5,12 @@ A minimal macOS menu bar app that locks keyboard input so you can clean your key
 ## Features
 
 - One-click keyboard lock from the menu bar
-- **Auto-Unlock Timer** — automatically unlock after 1, 3, 5, or 10 minutes
-- **Launch at Login** — toggle from the menu, no manual setup
+- **Lock overlay** — floating panel stays on screen while locked, with an Unlock button
+- **Composite menu bar icon** — keyboard + open lock when unlocked, keyboard + closed lock when locked
 - Blocks all key events system-wide including media keys (volume, brightness, play/pause)
 - Distinct sound feedback on lock and unlock
+- **Launch at Login** — toggle from the menu, no manual setup
 - Guided Accessibility permission setup on first launch
-- Tiny footprint — no background services, no Launch Agents
 
 ## Install
 
@@ -18,7 +18,7 @@ A minimal macOS menu bar app that locks keyboard input so you can clean your key
 
 ```bash
 brew tap egowic/tap
-brew install --cask keyboard-cleaner
+brew install --cask keycleaner
 ```
 
 ### Option 2 — curl
@@ -28,8 +28,6 @@ curl -L https://github.com/egowic/KeyboardCleaner/releases/latest/download/Keybo
   -o /tmp/KeyboardCleaner.zip && unzip /tmp/KeyboardCleaner.zip -d /Applications
 ```
 
-Then launch KeyboardCleaner from `/Applications`.
-
 ### "Unverified developer" warning
 
 macOS may block the app on first launch. To open it anyway:
@@ -38,25 +36,24 @@ macOS may block the app on first launch. To open it anyway:
 2. **Right-click** `KeyboardCleaner.app` → **Open**
 3. Click **Open** in the dialog
 
-After that, it opens normally without the warning.
-
 ### Accessibility Permission
 
-KeyboardCleaner requires **Accessibility** access to intercept keyboard events. On first launch the app will guide you — or go to **System Settings → Privacy & Security → Accessibility** and enable KeyboardCleaner manually.
+KeyboardCleaner requires **Accessibility** access to intercept keyboard events. On first launch macOS will show a system dialog — click **Open System Settings**, then enable KeyboardCleaner in the list.
+
+> If the app needs to restart after granting permission, it will prompt you automatically.
 
 ## Usage
 
-1. Click the keyboard icon in the menu bar
-2. Select **Lock Keyboard** — keyboard input is now blocked (icon changes to a lock)
-3. Optionally set an **Auto-Unlock Timer** from the submenu
-4. Clean your keys
-5. Select **Unlock Keyboard** (or use the trackpad to click the menu bar icon)
+1. Click the menu bar icon (keyboard + open lock)
+2. Select **Lock Keyboard** — a floating panel appears, keyboard input is blocked
+3. Clean your keys
+4. Click **Unlock** on the panel (or use the menu bar icon → **Unlock Keyboard**)
 
 ## Uninstall
 
 ```bash
 # Homebrew
-brew uninstall --cask keyboard-cleaner
+brew uninstall --cask keycleaner
 
 # Manual
 rm -rf /Applications/KeyboardCleaner.app
