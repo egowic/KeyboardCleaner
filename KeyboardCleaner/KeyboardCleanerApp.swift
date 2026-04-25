@@ -384,7 +384,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Strip leading "v" if present
             let latest = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
-            let htmlURL = json["html_url"] as? String ?? "https://github.com/\(githubRepo)/releases/latest"
+
+            // Find the zip asset download URL
+            let zipURL: String
+            if let assets = json["assets"] as? [[String: Any]],
+               let zip = assets.first(where: { ($0["name"] as? String) == "KeyboardCleaner.zip" }),
+               let downloadURL = zip["browser_download_url"] as? String {
+                zipURL = downloadURL
+            } else {
+                zipURL = "https://github.com/\(githubRepo)/releases/download/v\(latest)/KeyboardCleaner.zip"
+            }
 
             NSLog("KeyboardCleaner: current=\(currentVersion) latest=\(latest)")
 
@@ -395,12 +404,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            await showUpdateAvailableAlert(version: latest, url: htmlURL)
+            await showUpdateAvailableAlert(version: latest, zipURL: zipURL)
 
         } catch {
             NSLog("KeyboardCleaner: update check failed: \(error)")
             if !silent {
                 await showUpdateCheckFailedAlert()
+            }
+        }
+    }
+
+    @MainActor
+    private func downloadAndInstall(version: String, zipURL: String) {
+        Task {
+            statusItem?.button?.toolTip = "Downloading update…"
+            NSLog("KeyboardCleaner: downloading \(zipURL)")
+
+            do {
+                guard let url = URL(string: zipURL) else { return }
+                let (tmpZip, _) = try await URLSession.shared.download(from: url)
+
+                // Unzip to a temp directory
+                let tmpDir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("KeyboardCleaner-update-\(version)")
+                try? FileManager.default.removeItem(at: tmpDir)
+                try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+
+                let unzip = Process()
+                unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+                unzip.arguments = ["-o", tmpZip.path, "-d", tmpDir.path]
+                try unzip.run()
+                unzip.waitUntilExit()
+
+                let newApp = tmpDir.appendingPathComponent("KeyboardCleaner.app")
+                guard FileManager.default.fileExists(atPath: newApp.path) else {
+                    NSLog("KeyboardCleaner: unzipped app not found")
+                    await showInstallFailedAlert()
+                    return
+                }
+
+                // Replace current app in-place with ditto
+                let currentApp = Bundle.main.bundleURL
+                let ditto = Process()
+                ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                ditto.arguments = [newApp.path, currentApp.path]
+                try ditto.run()
+                ditto.waitUntilExit()
+
+                guard ditto.terminationStatus == 0 else {
+                    NSLog("KeyboardCleaner: ditto failed with status \(ditto.terminationStatus)")
+                    await showInstallFailedAlert()
+                    return
+                }
+
+                NSLog("KeyboardCleaner: update installed, prompting relaunch")
+                statusItem?.button?.toolTip = nil
+                await showRelaunchAfterUpdateAlert(version: version)
+
+            } catch {
+                NSLog("KeyboardCleaner: download/install failed: \(error)")
+                await showInstallFailedAlert()
             }
         }
     }
@@ -419,16 +482,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func showUpdateAvailableAlert(version: String, url: String) {
+    private func showUpdateAvailableAlert(version: String, zipURL: String) {
         let alert = NSAlert()
         alert.messageText = "Update Available — v\(version)"
-        alert.informativeText = "You're running v\(currentVersion). Version \(version) is available on GitHub."
-        alert.addButton(withTitle: "Download Update")
+        alert.informativeText = "You're running v\(currentVersion). Version \(version) is ready to install."
+        alert.addButton(withTitle: "Install Update")
         alert.addButton(withTitle: "Later")
         alert.alertStyle = .informational
+        if alert.runModal() == .alertFirstButtonReturn {
+            downloadAndInstall(version: version, zipURL: zipURL)
+        }
+    }
+
+    @MainActor
+    private func showRelaunchAfterUpdateAlert(version: String) {
+        let alert = NSAlert()
+        alert.messageText = "Update Installed — v\(version)"
+        alert.informativeText = "KeyboardCleaner has been updated. Relaunch to use the new version."
+        alert.addButton(withTitle: "Relaunch Now")
+        alert.addButton(withTitle: "Later")
+        alert.alertStyle = .informational
+        if alert.runModal() == .alertFirstButtonReturn {
+            relaunchApp()
+        }
+    }
+
+    @MainActor
+    private func showInstallFailedAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Update Failed"
+        alert.informativeText = "Could not install the update automatically. Please download it manually from GitHub."
+        alert.addButton(withTitle: "Open GitHub")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
         if alert.runModal() == .alertFirstButtonReturn,
-           let releaseURL = URL(string: url) {
-            NSWorkspace.shared.open(releaseURL)
+           let url = URL(string: "https://github.com/\(githubRepo)/releases/latest") {
+            NSWorkspace.shared.open(url)
         }
     }
 
