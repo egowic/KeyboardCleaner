@@ -301,7 +301,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hosting = NSHostingView(rootView: overlayView)
         hosting.frame = NSRect(origin: .zero, size: size)
         panel.contentView = hosting
-        panel.center()
+
+        // Center within the visible frame (excludes menu bar + Dock)
+        if let screen = NSScreen.main {
+            let vf = screen.visibleFrame
+            let x = vf.midX - size.width / 2
+            let y = vf.midY - size.height / 2
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        } else {
+            panel.center()
+        }
+
         panel.orderFrontRegardless()
         self.overlayPanel = panel
     }
@@ -324,7 +334,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         blocker.isMovable = false
-        blocker.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
+        // Level 23: above Dock (~20), below menu bar (24) and our overlay panel (25)
+        blocker.level = NSWindow.Level(rawValue: 23)
         blocker.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         blocker.backgroundColor = NSColor.clear
         blocker.isOpaque = false
