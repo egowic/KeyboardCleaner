@@ -49,7 +49,7 @@ struct LockOverlayView: View {
         }
         .padding(.vertical, 40)
         .padding(.horizontal, 48)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(Color.black, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(.white.opacity(0.15), lineWidth: 1)

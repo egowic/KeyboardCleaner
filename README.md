@@ -18,6 +18,14 @@ A minimal macOS menu bar app that locks keyboard input so you can clean your key
 
 ### Option 1 — Homebrew (recommended)
 
+If you don't have Homebrew installed, get it first from [brew.sh](https://brew.sh):
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then install KeyboardCleaner:
+
 ```bash
 brew tap egowic/tap
 brew install --cask keycleaner
