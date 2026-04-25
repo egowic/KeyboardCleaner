@@ -2,6 +2,8 @@
 
 A minimal macOS menu bar app that locks keyboard input so you can clean your keys without triggering anything. Trackpad and mouse remain fully functional.
 
+Unlike closing the lid — which wakes the Mac the moment you press a key — KeyboardCleaner keeps the screen on and blocks all keyboard input while you clean.
+
 ## Features
 
 - One-click keyboard lock from the menu bar
