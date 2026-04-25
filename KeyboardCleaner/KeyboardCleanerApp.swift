@@ -66,9 +66,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isLocked = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var overlayPanel: NSPanel?
 
-    // MARK: Menu item references
+    // Overlay: floating panel + full-screen click blocker
+    private var overlayPanel: NSPanel?
+    private var clickBlockerWindow: NSWindow?
+
+    // Menu item references
     private var lockMenuItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
 
@@ -82,12 +85,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         buildMenu()
         checkAccessibilityOnLaunch()
+        checkForUpdatesInBackground()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if isLocked { performUnlock() }
     }
 
     // MARK: - Menu Bar Icon
 
     private func menuBarImage(locked: Bool) -> NSImage {
-        // Her iki state de keyboard + kilit rozeti — açık veya kapalı
         let lockSymbol = locked ? "lock.fill" : "lock.open.fill"
         let size = NSSize(width: 26, height: 16)
         let composite = NSImage(size: size, flipped: false) { _ in
@@ -107,14 +114,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return composite
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        if isLocked { performUnlock() }
-    }
-
-    // MARK: Accessibility
+    // MARK: - Accessibility
 
     private func checkAccessibilityOnLaunch() {
-        // prompt:true → macOS shows its own dialog AND registers the app in the Accessibility list
         let trusted = AXIsProcessTrustedWithOptions(
             [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         )
@@ -124,23 +126,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func showRestartAlert() {
         let alert = NSAlert()
         alert.messageText = "Almost there — please restart KeyboardCleaner"
-        alert.informativeText = "You've granted Accessibility access, but KeyboardCleaner needs to be relaunched for the permission to take effect.\n\nClick Quit & Relaunch below."
+        alert.informativeText = "You've granted Accessibility access, but KeyboardCleaner needs to be relaunched for the permission to take effect."
         alert.addButton(withTitle: "Quit & Relaunch")
         alert.addButton(withTitle: "Later")
         alert.alertStyle = .informational
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            relaunchApp()
-        }
-    }
-
-    private func relaunchApp() {
-        let url = Bundle.main.bundleURL
-        let task = Process()
-        task.launchPath = "/usr/bin/open"
-        task.arguments = ["-n", url.path]
-        try? task.run()
-        NSApp.terminate(nil)
+        if alert.runModal() == .alertFirstButtonReturn { relaunchApp() }
     }
 
     private func showAccessibilityNeededAlert() {
@@ -150,9 +140,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
-
         if alert.runModal() == .alertFirstButtonReturn {
-            // Trigger registration in Accessibility list
             AXIsProcessTrustedWithOptions(
                 [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             )
@@ -162,7 +150,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: Menu
+    private func relaunchApp() {
+        let task = Process()
+        task.launchPath = "/usr/bin/open"
+        task.arguments = ["-n", Bundle.main.bundleURL.path]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+
+    // MARK: - Menu
 
     private func buildMenu() {
         let menu = NSMenu()
@@ -171,6 +167,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lockItem.target = self
         menu.addItem(lockItem)
         self.lockMenuItem = lockItem
+
+        menu.addItem(.separator())
+
+        let updateItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdatesManually), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
 
         menu.addItem(.separator())
 
@@ -193,7 +195,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lockMenuItem?.title = isLocked ? "Unlock Keyboard" : "Lock Keyboard"
     }
 
-    // MARK: Lock / Unlock
+    // MARK: - Lock / Unlock
 
     @objc private func toggleLock() {
         isLocked ? performUnlock() : performLock()
@@ -227,8 +229,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         guard let tap else {
-            // tapCreate can fail even when AXIsProcessTrusted returns true if
-            // the permission was granted while the process was already running.
             NSLog("KeyboardCleaner: tapCreate returned nil despite trusted")
             showRestartAlert()
             return
@@ -245,6 +245,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.eventTap = tap
         self.runLoopSource = source
         self.isLocked = true
+
         statusItem?.button?.image = menuBarImage(locked: true)
         playSound(named: "Submarine")
         showOverlay()
@@ -263,14 +264,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         eventTap = nil
         runLoopSource = nil
         isLocked = false
+
         statusItem?.button?.image = menuBarImage(locked: false)
         playSound(named: "Glass")
         hideOverlay()
     }
 
-    // MARK: Overlay
+    // MARK: - Overlay + Click Blocker
 
     private func showOverlay() {
+        showClickBlocker()
+
         let size = NSSize(width: 320, height: 260)
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
@@ -280,7 +284,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         panel.isMovable = false
         panel.becomesKeyOnlyIfNeeded = true
-        panel.hidesOnDeactivate = false   // başka uygulamaya geçince kaybolmasın
+        panel.hidesOnDeactivate = false
         panel.level = NSWindow.Level.statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.backgroundColor = NSColor.clear
@@ -299,16 +303,145 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = hosting
         panel.center()
         panel.orderFrontRegardless()
-
         self.overlayPanel = panel
     }
 
     private func hideOverlay() {
         overlayPanel?.orderOut(nil)
         overlayPanel = nil
+        hideClickBlocker()
     }
 
-    // MARK: Launch at Login
+    /// Full-screen transparent window that swallows all mouse clicks
+    /// except the menu bar (which sits at a higher window level).
+    private func showClickBlocker() {
+        guard let screen = NSScreen.main else { return }
+
+        let blocker = NSWindow(
+            contentRect: screen.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        blocker.isMovable = false
+        blocker.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
+        blocker.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        blocker.backgroundColor = NSColor.clear
+        blocker.isOpaque = false
+        blocker.ignoresMouseEvents = false
+        blocker.hidesOnDeactivate = false
+
+        // Transparent NSView that eats all clicks silently
+        let eater = ClickEaterView(frame: screen.frame)
+        blocker.contentView = eater
+        blocker.orderFrontRegardless()
+        self.clickBlockerWindow = blocker
+    }
+
+    private func hideClickBlocker() {
+        clickBlockerWindow?.orderOut(nil)
+        clickBlockerWindow = nil
+    }
+
+    // MARK: - Update Checker
+
+    private let githubRepo = "egowic/KeyboardCleaner"
+    private var currentVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    }
+
+    private func checkForUpdatesInBackground() {
+        Task.detached(priority: .background) { [weak self] in
+            await self?.fetchLatestRelease(silent: true)
+        }
+    }
+
+    @objc private func checkForUpdatesManually() {
+        Task.detached { [weak self] in
+            await self?.fetchLatestRelease(silent: false)
+        }
+    }
+
+    private func fetchLatestRelease(silent: Bool) async {
+        let urlString = "https://api.github.com/repos/\(githubRepo)/releases/latest"
+        guard let url = URL(string: urlString) else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tagName = json["tag_name"] as? String else { return }
+
+            // Strip leading "v" if present
+            let latest = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
+            let htmlURL = json["html_url"] as? String ?? "https://github.com/\(githubRepo)/releases/latest"
+
+            NSLog("KeyboardCleaner: current=\(currentVersion) latest=\(latest)")
+
+            guard isNewerVersion(latest, than: currentVersion) else {
+                if !silent {
+                    await showUpToDateAlert()
+                }
+                return
+            }
+
+            await showUpdateAvailableAlert(version: latest, url: htmlURL)
+
+        } catch {
+            NSLog("KeyboardCleaner: update check failed: \(error)")
+            if !silent {
+                await showUpdateCheckFailedAlert()
+            }
+        }
+    }
+
+    /// Returns true if `a` is a newer semantic version than `b`
+    private func isNewerVersion(_ a: String, than b: String) -> Bool {
+        let aParts = a.split(separator: ".").compactMap { Int($0) }
+        let bParts = b.split(separator: ".").compactMap { Int($0) }
+        let count = max(aParts.count, bParts.count)
+        for i in 0..<count {
+            let av = i < aParts.count ? aParts[i] : 0
+            let bv = i < bParts.count ? bParts[i] : 0
+            if av != bv { return av > bv }
+        }
+        return false
+    }
+
+    @MainActor
+    private func showUpdateAvailableAlert(version: String, url: String) {
+        let alert = NSAlert()
+        alert.messageText = "Update Available — v\(version)"
+        alert.informativeText = "You're running v\(currentVersion). Version \(version) is available on GitHub."
+        alert.addButton(withTitle: "Download Update")
+        alert.addButton(withTitle: "Later")
+        alert.alertStyle = .informational
+        if alert.runModal() == .alertFirstButtonReturn,
+           let releaseURL = URL(string: url) {
+            NSWorkspace.shared.open(releaseURL)
+        }
+    }
+
+    @MainActor
+    private func showUpToDateAlert() {
+        let alert = NSAlert()
+        alert.messageText = "You're up to date"
+        alert.informativeText = "KeyboardCleaner v\(currentVersion) is the latest version."
+        alert.addButton(withTitle: "OK")
+        alert.alertStyle = .informational
+        alert.runModal()
+    }
+
+    @MainActor
+    private func showUpdateCheckFailedAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Update Check Failed"
+        alert.informativeText = "Could not reach GitHub. Check your internet connection and try again."
+        alert.addButton(withTitle: "OK")
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    // MARK: - Launch at Login
 
     private var launchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
@@ -330,16 +463,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: Sound
+    // MARK: - Sound
 
     private func playSound(named name: String) {
         NSSound(named: NSSound.Name(name))?.play()
     }
 
-    // MARK: Quit
+    // MARK: - Quit
 
     @objc private func quitApp() {
         if isLocked { performUnlock() }
         NSApp.terminate(nil)
     }
+}
+
+// MARK: - Click Eater View
+
+/// Transparent NSView that consumes all mouse events, blocking
+/// interaction with windows behind the lock overlay.
+final class ClickEaterView: NSView {
+    override func mouseDown(with event: NSEvent) { /* swallow */ }
+    override func mouseUp(with event: NSEvent) { /* swallow */ }
+    override func rightMouseDown(with event: NSEvent) { /* swallow */ }
+    override func rightMouseUp(with event: NSEvent) { /* swallow */ }
+    override func otherMouseDown(with event: NSEvent) { /* swallow */ }
+    override func otherMouseUp(with event: NSEvent) { /* swallow */ }
+    override func mouseDragged(with event: NSEvent) { /* swallow */ }
+    override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
