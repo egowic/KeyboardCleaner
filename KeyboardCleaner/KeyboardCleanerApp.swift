@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import IOKit
 
 // CGEventType 14 = NX_SYSDEFINED (media keys: volume, brightness, play/pause…)
 private let kCGEventNXSysDefined: CGEventType = CGEventType(rawValue: 14)!
@@ -70,6 +71,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Overlay: floating panel + full-screen click blocker
     private var overlayPanel: NSPanel?
     private var clickBlockerWindow: NSWindow?
+
+    // Caps Lock guard
+    private var capsLockGuardTimer: Timer?
 
     // Menu item references
     private var lockMenuItem: NSMenuItem?
@@ -249,6 +253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.image = menuBarImage(locked: true)
         playSound(named: "Submarine")
         showOverlay()
+        startCapsLockGuard()
     }
 
     private func performUnlock() {
@@ -268,6 +273,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.image = menuBarImage(locked: false)
         playSound(named: "Glass")
         hideOverlay()
+        stopCapsLockGuard()
     }
 
     // MARK: - Overlay + Click Blocker
@@ -399,17 +405,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             guard isNewerVersion(latest, than: currentVersion) else {
                 if !silent {
-                    await showUpToDateAlert()
+                    showUpToDateAlert()
                 }
                 return
             }
 
-            await showUpdateAvailableAlert(version: latest, zipURL: zipURL)
+            showUpdateAvailableAlert(version: latest, zipURL: zipURL)
 
         } catch {
             NSLog("KeyboardCleaner: update check failed: \(error)")
             if !silent {
-                await showUpdateCheckFailedAlert()
+                showUpdateCheckFailedAlert()
             }
         }
     }
@@ -439,7 +445,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let newApp = tmpDir.appendingPathComponent("KeyboardCleaner.app")
                 guard FileManager.default.fileExists(atPath: newApp.path) else {
                     NSLog("KeyboardCleaner: unzipped app not found")
-                    await showInstallFailedAlert()
+                    showInstallFailedAlert()
                     return
                 }
 
@@ -453,17 +459,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 guard ditto.terminationStatus == 0 else {
                     NSLog("KeyboardCleaner: ditto failed with status \(ditto.terminationStatus)")
-                    await showInstallFailedAlert()
+                    showInstallFailedAlert()
                     return
                 }
 
                 NSLog("KeyboardCleaner: update installed, prompting relaunch")
                 statusItem?.button?.toolTip = nil
-                await showRelaunchAfterUpdateAlert(version: version)
+                showRelaunchAfterUpdateAlert(version: version)
 
             } catch {
                 NSLog("KeyboardCleaner: download/install failed: \(error)")
-                await showInstallFailedAlert()
+                showInstallFailedAlert()
             }
         }
     }
@@ -561,6 +567,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 launchAtLoginItem?.state = launchAtLoginEnabled ? .on : .off
             } catch { }
         }
+    }
+
+    // MARK: - Caps Lock Guard
+
+    /// Polls every 50 ms while locked; if Caps Lock is on, turns it off via IOKit.
+    /// Necessary because the HID driver toggles the LED before CGEventTap can intercept.
+    private func startCapsLockGuard() {
+        capsLockGuardTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
+            guard self?.isLocked == true else { return }
+            if CGEventSource.flagsState(.hidSystemState).contains(.maskAlphaShift) {
+                self?.setCapsLock(false)
+            }
+        }
+    }
+
+    private func stopCapsLockGuard() {
+        capsLockGuardTimer?.invalidate()
+        capsLockGuardTimer = nil
+    }
+
+    private func setCapsLock(_ enabled: Bool) {
+        var connect: io_connect_t = 0
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"))
+        guard service != IO_OBJECT_NULL else { return }
+        defer { IOObjectRelease(service) }
+        guard IOServiceOpen(service, mach_task_self_, 1, &connect) == KERN_SUCCESS else { return }
+        defer { IOServiceClose(connect) }
+        IOHIDSetModifierLockState(connect, 1, enabled) // 1 = Caps Lock, 0 = Num Lock, 2 = Scroll Lock
     }
 
     // MARK: - Sound
