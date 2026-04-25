@@ -2,8 +2,10 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-// CGEventType 14 = NX_SYSDEFINED (media keys: play/pause, brightness, volume, etc.)
+// CGEventType 14 = NX_SYSDEFINED (media keys: volume, brightness, play/pause…)
 private let kCGEventNXSysDefined: CGEventType = CGEventType(rawValue: 14)!
+
+// MARK: - App Entry Point
 
 @main
 struct KeyboardCleanerApp: App {
@@ -14,74 +16,157 @@ struct KeyboardCleanerApp: App {
     }
 }
 
+// MARK: - Lock Overlay View
+
+struct LockOverlayView: View {
+    let onUnlock: () -> Void
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 52, weight: .medium))
+                .foregroundStyle(.white)
+
+            VStack(spacing: 6) {
+                Text("Keyboard Locked")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+
+                Text("Trackpad is active")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+
+            Button(action: onUnlock) {
+                Text("Unlock")
+                    .font(.body.weight(.medium))
+                    .frame(width: 120)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.white.opacity(0.25))
+            .controlSize(.large)
+        }
+        .padding(.vertical, 40)
+        .padding(.horizontal, 48)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - App Delegate
+
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    // MARK: - State
+    // MARK: State
     private var statusItem: NSStatusItem?
     private var isLocked = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var autoUnlockTimer: Timer?
+    private var overlayPanel: NSPanel?
 
-    // MARK: - Menu items (kept as references for updates)
+    // MARK: Menu item references
     private var lockMenuItem: NSMenuItem?
-    private var timerSubmenu: NSMenu?
     private var launchAtLoginItem: NSMenuItem?
 
-    // MARK: - Lifecycle
+    // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem?.button?.image = NSImage(
-            systemSymbolName: "keyboard",
-            accessibilityDescription: "KeyboardCleaner — unlocked"
-        )
+        statusItem?.button?.image = menuBarImage(locked: false)
 
         buildMenu()
         checkAccessibilityOnLaunch()
     }
 
+    // MARK: - Menu Bar Icon
+
+    private func menuBarImage(locked: Bool) -> NSImage {
+        // Her iki state de keyboard + kilit rozeti — açık veya kapalı
+        let lockSymbol = locked ? "lock.fill" : "lock.open.fill"
+        let size = NSSize(width: 26, height: 16)
+        let composite = NSImage(size: size, flipped: false) { _ in
+            let kbConf = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+            if let kb = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)?
+                .withSymbolConfiguration(kbConf) {
+                kb.draw(in: NSRect(x: 0, y: 3, width: 19, height: 12))
+            }
+            let lockConf = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+            if let lock = NSImage(systemSymbolName: lockSymbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(lockConf) {
+                lock.draw(in: NSRect(x: 17, y: 0, width: 9, height: 10))
+            }
+            return true
+        }
+        composite.isTemplate = true
+        return composite
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        // Always clean up the event tap before quitting
         if isLocked { performUnlock() }
     }
 
-    // MARK: - Accessibility
+    // MARK: Accessibility
 
     private func checkAccessibilityOnLaunch() {
-        // Don't prompt on launch — just check silently.
-        // If not trusted, the user will be prompted when they first try to lock.
+        // prompt:true → macOS shows its own dialog AND registers the app in the Accessibility list
         let trusted = AXIsProcessTrustedWithOptions(
-            [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+            [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         )
-        if !trusted {
-            showAccessibilityAlert()
+        NSLog("KeyboardCleaner: launch trusted=\(trusted)")
+    }
+
+    private func showRestartAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Almost there — please restart KeyboardCleaner"
+        alert.informativeText = "You've granted Accessibility access, but KeyboardCleaner needs to be relaunched for the permission to take effect.\n\nClick Quit & Relaunch below."
+        alert.addButton(withTitle: "Quit & Relaunch")
+        alert.addButton(withTitle: "Later")
+        alert.alertStyle = .informational
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            relaunchApp()
         }
     }
 
-    private func showAccessibilityAlert() {
+    private func relaunchApp() {
+        let url = Bundle.main.bundleURL
+        let task = Process()
+        task.launchPath = "/usr/bin/open"
+        task.arguments = ["-n", url.path]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+
+    private func showAccessibilityNeededAlert() {
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "KeyboardCleaner needs Accessibility access to intercept keyboard events.\n\nOpen System Settings → Privacy & Security → Accessibility and enable KeyboardCleaner."
+        alert.informativeText = "KeyboardCleaner needs Accessibility access to lock keyboard input.\n\nOpen System Settings → Privacy & Security → Accessibility and enable KeyboardCleaner, then relaunch the app."
         alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
 
         if alert.runModal() == .alertFirstButtonReturn {
+            // Trigger registration in Accessibility list
+            AXIsProcessTrustedWithOptions(
+                [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            )
             NSWorkspace.shared.open(
                 URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
             )
         }
     }
 
-    // MARK: - Menu
+    // MARK: Menu
 
     private func buildMenu() {
         let menu = NSMenu()
 
-        // Lock / Unlock
         let lockItem = NSMenuItem(title: "Lock Keyboard", action: #selector(toggleLock), keyEquivalent: "")
         lockItem.target = self
         menu.addItem(lockItem)
@@ -89,35 +174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // Auto-Unlock Timer submenu
-        let timerParent = NSMenuItem(title: "Auto-Unlock Timer", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        let timerOptions: [(String, Int)] = [
-            ("Off",        0),
-            ("1 minute",  60),
-            ("3 minutes", 180),
-            ("5 minutes", 300),
-            ("10 minutes",600),
-        ]
-        for (title, seconds) in timerOptions {
-            let item = NSMenuItem(title: title, action: #selector(selectTimer(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = seconds
-            item.state = seconds == 0 ? .on : .off   // "Off" is default
-            sub.addItem(item)
-        }
-        timerParent.submenu = sub
-        menu.addItem(timerParent)
-        self.timerSubmenu = sub
-
-        menu.addItem(.separator())
-
-        // Launch at Login
-        let loginItem = NSMenuItem(
-            title: "Launch at Login",
-            action: #selector(toggleLaunchAtLogin),
-            keyEquivalent: ""
-        )
+        let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
         loginItem.state = launchAtLoginEnabled ? .on : .off
         menu.addItem(loginItem)
@@ -125,7 +182,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        // Quit
         let quitItem = NSMenuItem(title: "Quit KeyboardCleaner", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -137,7 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lockMenuItem?.title = isLocked ? "Unlock Keyboard" : "Lock Keyboard"
     }
 
-    // MARK: - Lock / Unlock
+    // MARK: Lock / Unlock
 
     @objc private func toggleLock() {
         isLocked ? performUnlock() : performLock()
@@ -147,54 +203,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func performLock() {
         guard !isLocked else { return }
 
-        // Verify accessibility at the moment of locking
-        guard AXIsProcessTrusted() else {
-            showAccessibilityAlert()
+        let trusted = AXIsProcessTrusted()
+        NSLog("KeyboardCleaner: performLock trusted=\(trusted)")
+
+        guard trusted else {
+            showAccessibilityNeededAlert()
             return
         }
 
         let mask: CGEventMask =
-            (1 << CGEventType.keyDown.rawValue)    |
-            (1 << CGEventType.keyUp.rawValue)      |
+            (1 << CGEventType.keyDown.rawValue)      |
+            (1 << CGEventType.keyUp.rawValue)        |
             (1 << CGEventType.flagsChanged.rawValue) |
-            (1 << kCGEventNXSysDefined.rawValue)   // media / special keys
+            (1 << kCGEventNXSysDefined.rawValue)
 
-        eventTap = CGEvent.tapCreate(
+        let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
-            callback: { _, _, _, _ -> Unmanaged<CGEvent>? in
-                return nil   // swallow the event
-            },
+            callback: { _, _, _, _ -> Unmanaged<CGEvent>? in nil },
             userInfo: nil
         )
 
-        guard let tap = eventTap else {
-            // tapCreate fails when Accessibility is not granted despite AXIsProcessTrusted
-            showAccessibilityAlert()
+        guard let tap else {
+            // tapCreate can fail even when AXIsProcessTrusted returns true if
+            // the permission was granted while the process was already running.
+            NSLog("KeyboardCleaner: tapCreate returned nil despite trusted")
+            showRestartAlert()
             return
         }
 
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            NSLog("KeyboardCleaner: failed to create runloop source")
+            return
+        }
+
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
-        isLocked = true
-        statusItem?.button?.image = NSImage(
-            systemSymbolName: "lock.fill",
-            accessibilityDescription: "KeyboardCleaner — locked"
-        )
-
+        self.eventTap = tap
+        self.runLoopSource = source
+        self.isLocked = true
+        statusItem?.button?.image = menuBarImage(locked: true)
         playSound(named: "Submarine")
-        scheduleAutoUnlockIfNeeded()
+        showOverlay()
     }
 
     private func performUnlock() {
         guard isLocked else { return }
-
-        autoUnlockTimer?.invalidate()
-        autoUnlockTimer = nil
 
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
@@ -205,60 +262,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         eventTap = nil
         runLoopSource = nil
-
         isLocked = false
-        statusItem?.button?.image = NSImage(
-            systemSymbolName: "keyboard",
-            accessibilityDescription: "KeyboardCleaner — unlocked"
-        )
-
+        statusItem?.button?.image = menuBarImage(locked: false)
         playSound(named: "Glass")
-        resetTimerMenuSelection()
+        hideOverlay()
     }
 
-    // MARK: - Auto-Unlock Timer
+    // MARK: Overlay
 
-    @objc private func selectTimer(_ sender: NSMenuItem) {
-        // Uncheck all, check selected
-        timerSubmenu?.items.forEach { $0.state = .off }
-        sender.state = .on
+    private func showOverlay() {
+        let size = NSSize(width: 320, height: 260)
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isMovable = false
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false   // başka uygulamaya geçince kaybolmasın
+        panel.level = NSWindow.Level.statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        panel.backgroundColor = NSColor.clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = false
 
-        autoUnlockTimer?.invalidate()
-        autoUnlockTimer = nil
-
-        let seconds = sender.tag
-        guard seconds > 0 else { return }
-
-        // Only schedule if currently locked; otherwise it will be picked up on next lock
-        if isLocked {
-            autoUnlockTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(seconds), repeats: false) { [weak self] _ in
-                guard let self else { return }
-                self.performUnlock()
-                self.refreshMenuState()
-            }
-        }
-    }
-
-    private func scheduleAutoUnlockIfNeeded() {
-        guard let checkedItem = timerSubmenu?.items.first(where: { $0.state == .on }),
-              checkedItem.tag > 0 else { return }
-
-        autoUnlockTimer = Timer.scheduledTimer(
-            withTimeInterval: TimeInterval(checkedItem.tag),
-            repeats: false
-        ) { [weak self] _ in
+        let overlayView = LockOverlayView { [weak self] in
             guard let self else { return }
             self.performUnlock()
             self.refreshMenuState()
         }
+
+        let hosting = NSHostingView(rootView: overlayView)
+        hosting.frame = NSRect(origin: .zero, size: size)
+        panel.contentView = hosting
+        panel.center()
+        panel.orderFrontRegardless()
+
+        self.overlayPanel = panel
     }
 
-    private func resetTimerMenuSelection() {
-        timerSubmenu?.items.forEach { $0.state = .off }
-        timerSubmenu?.items.first?.state = .on  // "Off"
+    private func hideOverlay() {
+        overlayPanel?.orderOut(nil)
+        overlayPanel = nil
     }
 
-    // MARK: - Launch at Login
+    // MARK: Launch at Login
 
     private var launchAtLoginEnabled: Bool {
         if #available(macOS 13.0, *) {
@@ -276,19 +326,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     try SMAppService.mainApp.register()
                 }
                 launchAtLoginItem?.state = launchAtLoginEnabled ? .on : .off
-            } catch {
-                // Silently ignore — user can retry
-            }
+            } catch { }
         }
     }
 
-    // MARK: - Sound
+    // MARK: Sound
 
     private func playSound(named name: String) {
         NSSound(named: NSSound.Name(name))?.play()
     }
 
-    // MARK: - Quit
+    // MARK: Quit
 
     @objc private func quitApp() {
         if isLocked { performUnlock() }
