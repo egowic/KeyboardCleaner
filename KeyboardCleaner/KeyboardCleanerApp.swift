@@ -90,6 +90,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         checkAccessibilityOnLaunch()
         checkForUpdatesInBackground()
+        performLock()
+        refreshMenuState()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
