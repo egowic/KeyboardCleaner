@@ -79,6 +79,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lockMenuItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
 
+    private let updateController = UpdateController()
+
     // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -89,7 +91,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         buildMenu()
         checkAccessibilityOnLaunch()
-        checkForUpdatesInBackground()
+        updateController.startAutomaticChecks()
         performLock()
         refreshMenuState()
     }
@@ -362,191 +364,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         clickBlockerWindow = nil
     }
 
-    // MARK: - Update Checker
-
-    private let githubRepo = "egowic/KeyboardCleaner"
-    private var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-    }
-
-    private func checkForUpdatesInBackground() {
-        Task.detached(priority: .background) { [weak self] in
-            await self?.fetchLatestRelease(silent: true)
-        }
-    }
-
     @objc private func checkForUpdatesManually() {
-        Task.detached { [weak self] in
-            await self?.fetchLatestRelease(silent: false)
-        }
-    }
-
-    private func fetchLatestRelease(silent: Bool) async {
-        let urlString = "https://api.github.com/repos/\(githubRepo)/releases/latest"
-        guard let url = URL(string: urlString) else { return }
-
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tagName = json["tag_name"] as? String else { return }
-
-            // Strip leading "v" if present
-            let latest = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
-
-            // Find the zip asset download URL
-            let zipURL: String
-            if let assets = json["assets"] as? [[String: Any]],
-               let zip = assets.first(where: { ($0["name"] as? String) == "KeyboardCleaner.zip" }),
-               let downloadURL = zip["browser_download_url"] as? String {
-                zipURL = downloadURL
-            } else {
-                zipURL = "https://github.com/\(githubRepo)/releases/download/v\(latest)/KeyboardCleaner.zip"
-            }
-
-            NSLog("KeyboardCleaner: current=\(currentVersion) latest=\(latest)")
-
-            guard isNewerVersion(latest, than: currentVersion) else {
-                if !silent {
-                    showUpToDateAlert()
-                }
-                return
-            }
-
-            showUpdateAvailableAlert(version: latest, zipURL: zipURL)
-
-        } catch {
-            NSLog("KeyboardCleaner: update check failed: \(error)")
-            if !silent {
-                showUpdateCheckFailedAlert()
-            }
-        }
-    }
-
-    @MainActor
-    private func downloadAndInstall(version: String, zipURL: String) {
-        Task {
-            statusItem?.button?.toolTip = "Downloading update…"
-            NSLog("KeyboardCleaner: downloading \(zipURL)")
-
-            do {
-                guard let url = URL(string: zipURL) else { return }
-                let (tmpZip, _) = try await URLSession.shared.download(from: url)
-
-                // Unzip to a temp directory
-                let tmpDir = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("KeyboardCleaner-update-\(version)")
-                try? FileManager.default.removeItem(at: tmpDir)
-                try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-
-                let unzip = Process()
-                unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-                unzip.arguments = ["-o", tmpZip.path, "-d", tmpDir.path]
-                try unzip.run()
-                unzip.waitUntilExit()
-
-                let newApp = tmpDir.appendingPathComponent("KeyboardCleaner.app")
-                guard FileManager.default.fileExists(atPath: newApp.path) else {
-                    NSLog("KeyboardCleaner: unzipped app not found")
-                    showInstallFailedAlert()
-                    return
-                }
-
-                // Replace current app in-place with ditto
-                let currentApp = Bundle.main.bundleURL
-                let ditto = Process()
-                ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-                ditto.arguments = [newApp.path, currentApp.path]
-                try ditto.run()
-                ditto.waitUntilExit()
-
-                guard ditto.terminationStatus == 0 else {
-                    NSLog("KeyboardCleaner: ditto failed with status \(ditto.terminationStatus)")
-                    showInstallFailedAlert()
-                    return
-                }
-
-                NSLog("KeyboardCleaner: update installed, prompting relaunch")
-                statusItem?.button?.toolTip = nil
-                showRelaunchAfterUpdateAlert(version: version)
-
-            } catch {
-                NSLog("KeyboardCleaner: download/install failed: \(error)")
-                showInstallFailedAlert()
-            }
-        }
-    }
-
-    /// Returns true if `a` is a newer semantic version than `b`
-    private func isNewerVersion(_ a: String, than b: String) -> Bool {
-        let aParts = a.split(separator: ".").compactMap { Int($0) }
-        let bParts = b.split(separator: ".").compactMap { Int($0) }
-        let count = max(aParts.count, bParts.count)
-        for i in 0..<count {
-            let av = i < aParts.count ? aParts[i] : 0
-            let bv = i < bParts.count ? bParts[i] : 0
-            if av != bv { return av > bv }
-        }
-        return false
-    }
-
-    @MainActor
-    private func showUpdateAvailableAlert(version: String, zipURL: String) {
-        let alert = NSAlert()
-        alert.messageText = "Update Available — v\(version)"
-        alert.informativeText = "You're running v\(currentVersion). Version \(version) is ready to install."
-        alert.addButton(withTitle: "Install Update")
-        alert.addButton(withTitle: "Later")
-        alert.alertStyle = .informational
-        if alert.runModal() == .alertFirstButtonReturn {
-            downloadAndInstall(version: version, zipURL: zipURL)
-        }
-    }
-
-    @MainActor
-    private func showRelaunchAfterUpdateAlert(version: String) {
-        let alert = NSAlert()
-        alert.messageText = "Relaunch Required — v\(version) is Ready"
-        alert.informativeText = "The update has been installed, but it won't take effect until KeyboardCleaner is relaunched.\n\nRelaunch now to start using v\(version)."
-        alert.addButton(withTitle: "Relaunch Now")
-        alert.addButton(withTitle: "Later")
-        alert.alertStyle = .warning
-        if alert.runModal() == .alertFirstButtonReturn {
-            relaunchApp()
-        }
-    }
-
-    @MainActor
-    private func showInstallFailedAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Update Failed"
-        alert.informativeText = "Could not install the update automatically. Please download it manually from GitHub."
-        alert.addButton(withTitle: "Open GitHub")
-        alert.addButton(withTitle: "Cancel")
-        alert.alertStyle = .warning
-        if alert.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "https://github.com/\(githubRepo)/releases/latest") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    @MainActor
-    private func showUpToDateAlert() {
-        let alert = NSAlert()
-        alert.messageText = "You're up to date"
-        alert.informativeText = "KeyboardCleaner v\(currentVersion) is the latest version."
-        alert.addButton(withTitle: "OK")
-        alert.alertStyle = .informational
-        alert.runModal()
-    }
-
-    @MainActor
-    private func showUpdateCheckFailedAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Update Check Failed"
-        alert.informativeText = "Could not reach GitHub. Check your internet connection and try again."
-        alert.addButton(withTitle: "OK")
-        alert.alertStyle = .warning
-        alert.runModal()
+        updateController.checkForUpdates(sender: self)
     }
 
     // MARK: - Launch at Login

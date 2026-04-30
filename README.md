@@ -11,7 +11,7 @@ Shutting down to clean your keyboard? A single keypress will power your Mac righ
 - **Click blocker** — while locked, only the menu bar remains interactive (Dock and desktop are blocked)
 - **Composite menu bar icon** — keyboard + open lock when unlocked, keyboard + closed lock when locked
 - Blocks all key events system-wide including media keys (volume, brightness, play/pause)
-- **Auto-update** — automatically downloads and installs new versions in the background
+- **Secure auto-update** — checks Sparkle appcasts and verifies EdDSA-signed updates
 - **Launch at Login** — toggle from the menu, no manual setup
 - Guided Accessibility permission setup on first launch
 - Distinct sound feedback on lock and unlock
@@ -56,9 +56,19 @@ KeyboardCleaner requires **Accessibility** access to intercept keyboard events. 
 
 ## Update
 
-KeyboardCleaner checks for updates automatically on each launch. When a new version is available, it will download and install it for you — just click **Relaunch Now** when prompted.
+KeyboardCleaner checks for updates automatically with Sparkle. When a new version is available, Sparkle verifies the signed update before offering it.
 
 You can also check manually via the menu bar icon → **Check for Updates…**
+
+## Release Updates
+
+KeyboardCleaner uses Sparkle 2 for updates. Before shipping a release:
+
+1. Generate or reuse the Sparkle EdDSA key pair with Sparkle's `generate_keys --account egowic.KeyboardCleaner` tool.
+2. Keep the generated `SUPublicEDKey` in the Xcode project in sync with the public key.
+3. Keep the private key out of the repository and use it only to sign release archives.
+4. Publish `appcast.xml` at `https://github.com/egowic/KeyboardCleaner/releases/latest/download/appcast.xml`.
+5. Sign the `KeyboardCleaner.zip` release archive with Sparkle's signing/appcast tools.
 
 ## Usage
 
