@@ -92,7 +92,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         checkAccessibilityOnLaunch()
         updateController.startAutomaticChecks()
-        performLock()
         refreshMenuState()
     }
 
