@@ -90,7 +90,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         checkAccessibilityOnLaunch()
         checkForUpdatesInBackground()
-        performLock()
         refreshMenuState()
     }
 
@@ -306,7 +305,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.refreshMenuState()
         }
 
-        let hosting = NSHostingView(rootView: overlayView)
+        let hosting = FirstMouseHostingView(rootView: overlayView)
         hosting.frame = NSRect(origin: .zero, size: size)
         panel.contentView = hosting
 
@@ -412,6 +411,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
+            if silent && isLocked { return }
             showUpdateAvailableAlert(version: latest, zipURL: zipURL)
 
         } catch {
@@ -611,6 +611,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if isLocked { performUnlock() }
         NSApp.terminate(nil)
     }
+}
+
+// MARK: - First Mouse Hosting View
+
+/// NSHostingView subclass that accepts first mouse so the Unlock button
+/// fires on the first click even when the panel isn't the key window.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 // MARK: - Click Eater View
